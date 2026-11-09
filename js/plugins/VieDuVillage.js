@@ -1,5 +1,5 @@
 //=============================================================================
-// VieDuVillage.js — v2.2  ·  Les PNJ ont une journée
+// VieDuVillage.js — v2.3  ·  Les PNJ ont une journée
 // RPG Maker MV   ·   by JOKO
 //   À charger APRÈS MOG_TimeSystem (il lui demande l'heure).
 //   AlleesEtVenues (le voyage d'une carte à l'autre) se charge après lui.
@@ -160,6 +160,10 @@
  *      VieDuVillage.pret('cle', 30)         pas joué depuis 30 min de jeu
  *   Un numéro « carte:événement » désigne quelqu'un où qu'il soit (sa copie de
  *   passage, AlleesEtVenues).
+ *   v2.3 (2026-11-09) : un événement SANS IMAGE n'est jamais « là » pour une
+ *   scène. JOKO réutilise des numéros pour ses marques (« kaze », « place »,
+ *   page vide) : la scène de Fanchon (Marché, év. 26) faisait parler la marque
+ *   « kaze », une phrase au-dessus d'une case vide.
  *
  *  SCRIPT :  VieDuVillage.etat()      → ce que chacun fait, là, maintenant
  * ═══════════════════════════════════════════════════════════════════════════
@@ -802,7 +806,9 @@
         var nom = s.toLowerCase();
         return $gameMap.events().filter(function (e) { return String(e.event().name || '').trim().toLowerCase() === nom; })[0] || null;
     }
-    function la(e) { return !!(e && !e._erased && e._pageIndex >= 0 && e.opacity() > 0 && !(e._vie && e._vie.dedans) && !enPassage(e)); }
+    // v2.3 : sans image (une marque de JOKO, une page vide), personne n'est là pour une scène
+    function visible(e) { return !!(e.characterName() || e.tileId() > 0); }
+    function la(e) { return !!(e && !e._erased && e._pageIndex >= 0 && visible(e) && e.opacity() > 0 && !(e._vie && e._vie.dedans) && !enPassage(e)); }
     function libre(e) { return la(e) && !e.isMoveRouteForcing() && !(e._vieScene > 0) && !(e._vie && e._vie.course) && !(e._pauseConversation > 0); }
     function scene(e, n) { if (e) { e._vieScene = n; } }
     var dernieres = {};
