@@ -1,10 +1,10 @@
 //=============================================================================
-// LeChant.js — v1.0
+// LeChant.js — v1.1
 // Un ennemi qui chante : sous 70 % de ses PV, il brise l'écran, et le combat
 // devient le Theatrhythm de MOG — vos PV à vous, ses PV à lui. Puis il alterne.
 //=============================================================================
 /*:
- * @plugindesc v1.0 ■ Un ennemi qui chante (<Chant: partition>) : sous 70 % de
+ * @plugindesc v1.1 ■ Un ennemi qui chante (<Chant: partition>) : sous 70 % de
  * ses PV il brise l'écran, le combat passe au Theatrhythm (vos PV, les siens),
  * puis il alterne avec le combat normal tous les 3 tours.
  * @author pour JOKO
@@ -36,6 +36,15 @@
  * @default 60
  * @desc Avec une partition, le chant dure ce qu'elle dure.
  *
+ * @param degats
+ * @text Ses coups dans le chant (% de ceux de MOG)
+ * @type number
+ * @min 1
+ * @max 1000
+ * @default 100
+ * @desc À chaque note ratée, il frappe l'équipe. 100 = le calcul de MOG
+ * (son ATQ + sa MAG − la défense moyenne de l'équipe). <Chant dégâts: n> pour lui seul.
+ *
  * @param son
  * @text Le son de l'écran qui se brise
  * @type file
@@ -65,6 +74,12 @@
  *     <Chant seuil: 70>      il chante la 1re fois sous 70 % de ses PV
  *     <Chant tours: 3>       3 tours de combat normal entre deux chants
  *     <Chant vitesse: 8>     la vitesse des notes, si la partition n'en donne pas
+ *     <Chant dégâts: 30>     ses coups à chaque note ratée, en % de ceux de MOG
+ *
+ * Ses coups : MOG fait frapper l'ennemi à chaque note ratée, pour son ATQ +
+ * sa MAG − la défense moyenne de l'équipe. Contre un boss à 999 / 999, c'est
+ * un quart des PV de l'équipe par raté (l'avatar d'Ardélia : 1 636, 4 ratés
+ * et c'est fini) : <Chant dégâts: 30> le ramène à 30 % (≈ 490, 13 ratés).
  *
  * CE QUI SE PASSE
  *  1. Au début d'un tour, s'il est sous le seuil : « ♪ Il brise l'écran ! »,
@@ -94,6 +109,7 @@ var LeChant = LeChant || {};
     var DUREE = Number(P.dureeSansPartition || 60);
     var SON = String(P.son || 'Break');
     var ANNONCE = String(P.annonce || '♪ Il brise l\'écran !');
+    var DEGATS = Number(P.degats || 100);
     var COULOIRS = 4;                                   // ceux de MOG
 
     LeChant._enCours = null;
@@ -234,6 +250,22 @@ var LeChant = LeChant || {};
         this._enemy_hp = [e.hp, e.mhp];
         this._enemy._hp = e.hp;
         this._chant.pvEquipe = this._party_hp[0];
+        this._chant.force = LeChant.forceDe(e);
+    };
+
+    // ses coups dans le chant : <Chant dégâts: n> (ou le réglage), en % du calcul de MOG
+    LeChant.forceDe = function (e) {
+        var v = Number(note(e, 'Chant dégâts') || note(e, 'Chant degats'));
+        return (v > 0 ? v : DEGATS) / 100;
+    };
+    var _degats = Scene_Theatrhythm.prototype.execute_damage;
+    Scene_Theatrhythm.prototype.execute_damage = function (cible) {
+        var f = this._chant ? this._chant.force : 1;
+        if (cible !== 1 || !f || f === 1) return _degats.call(this, cible);
+        // MOG : max(ATQ+MAG de l'ennemi − défense de l'équipe, 1) ; on n'en garde que f
+        var brut = Math.max(this._enemy_atk - this._party_def, 1), garde = this._enemy_atk;
+        this._enemy_atk = this._party_def + Math.max(1, Math.floor(brut * f));
+        try { _degats.call(this, cible); } finally { this._enemy_atk = garde; }
     };
 
     // le décor du combat (les images mêmes du combat en cours), pas celui de la carte
