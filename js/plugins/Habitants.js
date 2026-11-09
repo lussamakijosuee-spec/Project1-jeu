@@ -1,5 +1,5 @@
 //=============================================================================
-// Habitants.js — v1.4  ·  Les gens vivent leur vie
+// Habitants.js — v1.5  ·  Les gens vivent leur vie
 // RPG Maker MV   ·   pour JOKO
 //   À charger APRÈS MOG_TimeSystem (il lui demande l'heure et la saison).
 //=============================================================================
@@ -125,6 +125,38 @@
  * @type number
  * @default 1
  *
+ * @param varEtape
+ * @text Variable : l'étape du village (v1.5)
+ * @type variable
+ * @default 889
+ * @desc 0 la faille déclarée · 1 la garde royale s'installe · 2 les
+ * aventuriers arrivent · 3 la première expédition est entrée · 4 elle est
+ * revenue. C'est JOKO qui la fait avancer, depuis ses événements.
+ *
+ * @param affiniteFil
+ * @text Affinité : une conversation neuve (v1.5)
+ * @type number
+ * @min 0
+ * @default 1
+ * @desc Une vraie conversation (un pas de son fil) rapproche autant qu'un
+ * cadeau aimé : parler compte, pas seulement offrir.
+ *
+ * @param tristesse
+ * @text Les jours de tristesse, par carte (%)
+ * @default 29:15, 30:12, 31:25, 33:8, 41:12, 42:12, 43:12, 44:12, 46:15, 47:10
+ * @desc La faille donne sur les Larmiers, la région de la Tristesse : certains
+ * jours, elle prend un habitant. « carte:% » ; une carte absente : 12 %.
+ *
+ * @param signeNeuf
+ * @text Bulle sur qui a du neuf (v1.5)
+ * @type boolean
+ * @default true
+ *
+ * @param bulleNeuf
+ * @text Laquelle (1 ! · 2 ? · 3 note · 8 « … » · 9 ampoule)
+ * @type number
+ * @default 8
+ *
  * @help
  * ═══════════════════════════════════════════════════════════════════════════
  *  LES GENS VIVENT LEUR VIE
@@ -191,6 +223,24 @@
  *                                          déteste) ; l'affinité suit les réglages,
  *                                          double le jour de son anniversaire
  *         Habitants.anniversaire('4/12')  c'est aujourd'hui (mois/jour)
+ *
+ *  7. LA REFONTE (v1.5, 2026-11-09 ; JOKO : « beaucoup plus humains et beaucoup
+ *     plus sentimentaux », puis, sur docs/PNJ_LA_BASE.md, « tout ou le meilleur ») :
+ *     · LE FIL — « Discuter » donne la suite de la dernière fois, une
+ *       conversation neuve par jour au plus (pas de quoi « vider » quelqu'un
+ *       en une soirée), puis ses petites phrases de tous les jours.
+ *         Habitants.fil(this, [0, 0, 3])   la conversation neuve à dire (-1 : aucune)
+ *         Habitants.filVu(this)            elle est dite (+ affiniteFil)
+ *     · SES QUESTIONS — il se souvient de ta réponse, et un autre peut la répéter :
+ *         Habitants.repondre(this, 'ciel', 'encore')   Habitants.reponse(this, 'ciel')
+ *         Habitants.reponseDe('29:29', 'ciel')         Habitants.aRecu('29:29')
+ *     · LES ÉTAPES DU VILLAGE — la variable « varEtape » ; chacun dit la sienne
+ *       une fois, quand elle change :  Habitants.etape()  Habitants.etapeNeuve(this)
+ *     · LES JOURS DE TRISTESSE — un tirage par habitant et par jour (réglage
+ *       « tristesse ») :  Habitants.triste(this)  Habitants.tristeDit(this)
+ *     · « IL A DU NEUF » — une bulle discrète au-dessus de qui, parmi ceux
+ *       qu'on connaît, a une conversation neuve ou la nouvelle du jour (les
+ *       balises <Fil: …> et <Etapes: …> que l'outil écrit en tête de page).
  *
  *  Commandes de plugin : aucune.
  */
@@ -343,9 +393,99 @@ window.Habitants = Habitants;
         if (!objet || genre === 'deteste') return;                 // il te le rend
         $gameParty.loseItem(objet, 1);
         f.cadeau = jour();
+        if (genre === 'adore') f.adore = jour();                   // v1.5 : un autre peut en parler (les ragots)
         f.affinite += (POINTS[genre] || 0) * (anniv ? 2 : 1);
         $gameVariables.setValue(V.affinite, f.affinite);
     };
+
+    /* ── v1.5 · la refonte (JOKO, 2026-11-09 ; docs/PNJ_LA_BASE.md, M1-M7) ── */
+    var V_ETAPE = Number(P.varEtape || 889);
+    V.etape = V_ETAPE;
+    var PAR_FIL = Number(P.affiniteFil !== undefined ? P.affiniteFil : 1);
+    var TRISTESSE = {}, TRISTESSE_DEFAUT = 0.12;
+    String(P.tristesse !== undefined ? P.tristesse : '29:15, 30:12, 31:25, 33:8, 41:12, 42:12, 43:12, 44:12, 46:15, 47:10').split(',').forEach(function (x) {
+        var m = x.split(':'); if (m.length === 2 && m[0].trim()) TRISTESSE[Number(m[0])] = Math.max(0, Number(m[1])) / 100;
+    });
+    var NEUF = String(P.signeNeuf !== undefined ? P.signeNeuf : 'true') === 'true';
+    var BULLE_NEUF = Number(P.bulleNeuf || 8);
+
+    // M1 · le fil : la conversation neuve, dans l'ordre, une par jour ; « paliers » : l'amitié qu'il faut pour chacune
+    Habitants.fil = function (interp, paliers) {
+        var f = fiche(interp), i = f.fil || 0;
+        if (!paliers || i >= paliers.length || f.filJour === jour() || f.affinite < (paliers[i] || 0)) return -1;
+        return i;
+    };
+    Habitants.filVu = function (interp) {
+        var f = fiche(interp);
+        f.fil = (f.fil || 0) + 1; f.filJour = jour();
+        f.affinite += PAR_FIL;                                    // M7 : parler compte autant qu'un cadeau aimé
+        $gameVariables.setValue(V.affinite, f.affinite);
+    };
+    // M2 · il se souvient de ta réponse ; M5 · un autre peut la répéter, ou parler d'un cadeau
+    Habitants.repondre = function (interp, c, val) { var f = fiche(interp); (f.rep = f.rep || {})[c] = val; f.repJour = jour(); };
+    Habitants.reponse = function (interp, c) { var r = fiche(interp).rep; return r && r[c] !== undefined ? r[c] : null; };
+    Habitants.reponseHier = function (interp, c) { var f = fiche(interp); return Habitants.reponse(interp, c) !== null && f.repJour !== jour(); };
+    Habitants.reponseDe = function (k, c) { var f = memoire()[k]; return f && f.rep && f.rep[c] !== undefined ? f.rep[c] : null; };
+    Habitants.aRecu = function (k) { var f = memoire()[k]; return !!(f && f.adore && f.adore < jour()); };
+    Habitants.ragot = function (interp, n) { return !(fiche(interp).ragots || [])[n]; };
+    Habitants.ragotDit = function (interp, n) { var f = fiche(interp); (f.ragots = f.ragots || [])[n] = 1; };
+    // M3 · les étapes du village : chacun dit la sienne une fois, quand elle change (pas à la première rencontre)
+    Habitants.etape = function () { return $gameVariables.value(V_ETAPE) || 0; };
+    Habitants.etapeNeuve = function (interp) {
+        var f = fiche(interp), e = Habitants.etape();
+        if (f.visites <= 1) { f.etapeDite = e; return -1; }
+        return f.etapeDite === e ? -1 : e;
+    };
+    Habitants.etapeDite = function (interp) { fiche(interp).etapeDite = Habitants.etape(); };
+    // M4 · les jours de tristesse (la faille donne sur les Larmiers) : le même tirage toute la journée, par habitant
+    function graine(t) {
+        var h = 2166136261; for (var i = 0; i < t.length; i++) { h ^= t.charCodeAt(i); h = Math.imul(h, 16777619); }
+        // le mélange final (celui de MurmurHash3) : sans lui, deux jours qui se suivent tiraient presque pareil
+        h ^= h >>> 16; h = Math.imul(h, 0x85ebca6b); h ^= h >>> 13; h = Math.imul(h, 0xc2b2ae35); h ^= h >>> 16;
+        return (h >>> 0) / 4294967296;
+    }
+    Habitants.tristeCle = function (k, j) {
+        var c = Number(String(k).split(':')[0]), p = TRISTESSE[c] !== undefined ? TRISTESSE[c] : TRISTESSE_DEFAUT;
+        return graine(k + '#' + (j === undefined ? jour() : j)) < p;
+    };
+    Habitants.triste = function (interp) { return Habitants.tristeCle(cle(interp)); };
+    Habitants.tristeDit = function (interp) { var f = fiche(interp); if (f.tristeJour === jour()) return false; f.tristeJour = jour(); return true; };
+    // M6 · « il a du neuf » : les balises que l'outil écrit en tête de page
+    function balises(e) {
+        if (e._habBalPage === e._pageIndex) return e._habBal;
+        var p = e._pageIndex >= 0 ? e.page() : null, r = { fil: null, etapes: null };
+        function nombres(t) { return t.split(',').filter(function (x) { return x.trim() !== ''; }).map(Number); }
+        if (p) for (var k = 0; k < p.list.length; k++) {
+            var c = p.list[k]; if (c.code !== 108 && c.code !== 408) break;
+            var t = String(c.parameters[0]), a = /<Fil:\s*([\d,\s]*)>/i.exec(t), b = /<Etapes:\s*([\d,\s]*)>/i.exec(t);
+            if (a) r.fil = nombres(a[1]);
+            if (b) r.etapes = nombres(b[1]);
+        }
+        e._habBalPage = e._pageIndex; e._habBal = r;
+        return r;
+    }
+    function cleEv(e) { return cle({ _eventId: e.eventId(), _mapId: $gameMap.mapId(), character: function () { return e; } }); }
+    Habitants.aDuNeuf = function (e) {
+        if (!e || e._pageIndex < 0) return false;
+        var b = balises(e); if (!b.fil && !b.etapes) return false;
+        var f = memoire()[cleEv(e)]; if (!f || !f.visites) return false;        // seulement ceux qu'on connaît
+        var j = jour(), aff = (f.affinite || 0) + (f.jour !== j ? PAR_JOUR : 0), i = f.fil || 0;
+        if (b.fil && i < b.fil.length && f.filJour !== j && aff >= (b.fil[i] || 0)) return true;
+        var et = Habitants.etape();
+        return !!(b.etapes && b.etapes.indexOf(et) >= 0 && f.etapeDite !== et);
+    };
+    function signesNeuf() {
+        if (!NEUF || !$gamePlayer || !$gameMap || $gameMessage.isBusy() || $gameMap.isEventRunning()) return;
+        $gameMap.events().forEach(function (e) {
+            if (!e || e._erased || e._pageIndex < 0 || e.opacity() === 0 || e._balloonId > 0 || (e.isBalloonPlaying && e.isBalloonPlaying())) return;
+            if (Math.abs(e.x - $gamePlayer.x) + Math.abs(e.y - $gamePlayer.y) > 6) return;
+            if ((e._habNeufT = (e._habNeufT || 0) - 1) > 0) return;
+            if (!Habitants.aDuNeuf(e)) return;
+            e._habNeufT = 4;                                          // une bulle toutes les huit secondes environ
+            e.requestBalloon(BULLE_NEUF);
+        });
+    }
+    Habitants._signesNeuf = signesNeuf;
 
     /* ── les horaires ───────────────────────────────────────────────────── */
     function lire(ev) {
@@ -764,6 +904,7 @@ window.Habitants = Habitants;
     Scene_Map.prototype.update = function () {
         _updQ.call(this);
         if ((this._habQ = (this._habQ || 0) + 1) >= 60) { this._habQ = 0; regarderLesQuetes(); }
+        if ((this._habN = (this._habN || 0) + 1) >= 120) { this._habN = 0; signesNeuf(); }
     };
 
     // ce que fait chacun, pour les bancs
