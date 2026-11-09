@@ -1,5 +1,5 @@
 //=============================================================================
-// VieDuVillage.js — v2.3  ·  Les PNJ ont une journée
+// VieDuVillage.js — v2.4  ·  Les PNJ ont une journée
 // RPG Maker MV   ·   by JOKO
 //   À charger APRÈS MOG_TimeSystem (il lui demande l'heure).
 //   AlleesEtVenues (le voyage d'une carte à l'autre) se charge après lui.
@@ -97,8 +97,9 @@
  *
  *  Qui vit ? Tout événement qui porte <NPC:> ou <Vie:>, et (v2.0) tout
  *  habitant de l'outil (« ◆ HABITANT »). Les événements « ✎ » de l'atelier, les
- *  portes, et ceux à qui JOKO a tracé un déplacement (« Personnalisé ») ne sont
- *  jamais pilotés.
+ *  portes, ceux à qui JOKO a tracé un déplacement (« Personnalisé ») et les
+ *  objets (une image « ! » : un tableau, une affiche — v2.4) ne sont jamais
+ *  pilotés.
  *
  *  ─────────────────────────────────────────────────────────────────────────
  *  LES FAÇONS DE VIVRE
@@ -164,6 +165,11 @@
  *   scène. JOKO réutilise des numéros pour ses marques (« kaze », « place »,
  *   page vide) : la scène de Fanchon (Marché, év. 26) faisait parler la marque
  *   « kaze », une phrase au-dessus d'une case vide.
+ *   v2.4 (2026-11-09) : un OBJET ne vit pas. Une image « ! » (la convention de
+ *   MV : un tableau, une affiche, un coffre) ne marche pas, ne rentre pas le
+ *   soir, ne tourne pas la tête, et ne se tourne pas vers toi quand tu lui
+ *   parles : il garde la direction de l'éditeur (la rangée de son image). Le
+ *   tableau d'affichage devant la ville (29:10) marchait jusqu'à la place.
  *
  *  SCRIPT :  VieDuVillage.etat()      → ce que chacun fait, là, maintenant
  * ═══════════════════════════════════════════════════════════════════════════
@@ -337,6 +343,14 @@
         var pg = e.page && e.page();
         return !!(pg && pg.moveType === 3);
     }
+    // v2.4 : une image « ! » (la convention de MV pour les objets : un tableau, une affiche, un coffre)
+    //   n'est pas une personne. JOKO a sorti le tableau d'affichage du bar (« ◆ HABITANT », sans image)
+    //   devant la ville avec l'image d'un panneau (29:10) : il marchait jusqu'à la place, rentrait le soir,
+    //   tournait la tête — vers le haut, une rangée vide de l'image : il disparaissait.
+    function estObjet(e) {
+        var pg = e && e.page && e.page();
+        return !!(pg && pg.image && /^!/.test(String(pg.image.characterName || '')));
+    }
 
     function casePraticable(c) {
         function bonne(x, y) {
@@ -380,9 +394,9 @@
             if (!e || e._erased) { return; }
             if (estPorte(e)) { portes.push({ x: e.x, y: e.y }); return; }
             if (aLui(e)) { return; }
-            // un tableau, une affiche : un habitant sans visage ne marche pas
+            // un tableau, une affiche : un habitant sans visage ne marche pas — ni un objet (une image « ! », v2.4)
             var pg = e.page && e.page();
-            if (pg && !pg.image.characterName && !e._visite) { return; }
+            if (pg && (!pg.image.characterName || estObjet(e)) && !e._visite) { return; }
             var m = marques(e);
             if (!e._visite && !m.cle && !m.vie && !m.habitant) { return; }   // seuls les PNJ marqués vivent
             if (e._visite && !m.cle && !m.vie && !m.habitant) { m.habitant = true; }
@@ -663,6 +677,21 @@
         v.course = lieux[Math.randomInt(lieux.length)]; v.tCourse = 0; v.resteLa = null;
         ($gameMap._vieLieux = $gameMap._vieLieux || {})[v.course.x + ',' + v.course.y] = ev.eventId();
     }
+
+    /* ── un objet qui parle ne se tourne pas vers toi ───────────────────── */
+    // MV tourne vers le joueur l'événement qu'on lance (lock), sauf « Direction fixe ». Pour un objet
+    // de l'outil (une image « ! » qui porte « ◆ HABITANT », <NPC:> ou <Vie:>), sa direction est la rangée
+    // de son image que JOKO a choisie : le tableau 29:10 montrait sa face vide pendant qu'on lisait.
+    function objetQuiParle(e) {
+        if (!estObjet(e)) return false;
+        var m = marques(e);
+        return !!(m.habitant || m.cle || m.vie);
+    }
+    var _lock = Game_Event.prototype.lock;
+    Game_Event.prototype.lock = function () {
+        if (!this._locked && objetQuiParle(this)) { this._prelockDirection = this.direction(); this._locked = true; return; }
+        _lock.call(this);
+    };
 
     /* ── ils te voient ─────────────────────────────────────────────────── */
     function sOccupe(ev) {
