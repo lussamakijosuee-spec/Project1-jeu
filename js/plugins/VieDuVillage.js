@@ -1,5 +1,5 @@
 //=============================================================================
-// VieDuVillage.js — v2.4  ·  Les PNJ ont une journée
+// VieDuVillage.js — v2.5  ·  Les PNJ ont une journée
 // RPG Maker MV   ·   by JOKO
 //   À charger APRÈS MOG_TimeSystem (il lui demande l'heure).
 //   AlleesEtVenues (le voyage d'une carte à l'autre) se charge après lui.
@@ -60,6 +60,14 @@
  * @text Rentrer quand il pleut ?
  * @type boolean
  * @default true
+ *
+ * @param repas
+ * @text Le repas de midi, ailleurs que sur la place
+ * @type string
+ * @default 33: 29,30
+ * @desc v2.5 : par carte, « carte: x,y » (séparées par « ; »). À midi, les
+ * villageois mangent là, chacun sa case, au lieu de la place. Village de Pêche :
+ * sur le sable (JOKO, 2026-11-09 : la plage). Vide = la place, comme avant.
  *
  * @param jourDeRepos
  * @text Jour de repos (0 = dimanche, 6 = samedi, -1 = aucun)
@@ -170,6 +178,10 @@
  *   soir, ne tourne pas la tête, et ne se tourne pas vers toi quand tu lui
  *   parles : il garde la direction de l'éditeur (la rangée de son image). Le
  *   tableau d'affichage devant la ville (29:10) marchait jusqu'à la place.
+ *   v2.5 (2026-11-09) : la plage. À midi, le Village de Pêche mange sur le
+ *   sable (réglage « repas » : une case par carte) au lieu de se serrer sur le
+ *   pré de l'étal (7 personnes sur 12 dans 7 × 5 cases, mesuré) ; <Pluie: reste>
+ *   sur une page : il ne rentre pas sous la pluie (Orin, sous l'auvent).
  *
  *  SCRIPT :  VieDuVillage.etat()      → ce que chacun fait, là, maintenant
  * ═══════════════════════════════════════════════════════════════════════════
@@ -187,6 +199,11 @@
     var PAS = Math.max(1, parseInt(P['pasParImage'] || 6));
     var PORTEE = Math.max(8, parseInt(P['portee'] || 30));
     var FLANERIE = Math.max(0, parseInt(P['flanerie'] || 2));
+    // v2.5 : le repas de midi, ailleurs que sur la place (« 33: 29,30 ; … »)
+    var REPAS = {};
+    String(P['repas'] === undefined ? '33: 29,30' : P['repas']).split(';').forEach(function (t) {
+        var m = /(\d+)\s*:\s*(\d+)\s*,\s*(\d+)/.exec(t); if (m) REPAS[+m[1]] = { x: +m[2], y: +m[3] };
+    });
     var REPOS = parseInt(P['jourDeRepos'] !== undefined ? P['jourDeRepos'] : 0);
     var TOURNER = String(P['seTourner'] || 'true') === 'true';
     var ECARTER = String(P['sEcarter'] || 'true') === 'true';
@@ -260,7 +277,7 @@
             return { lieu: 'poste', dedans: false };
         }
 
-        if (pluie && PLUIE) { return { lieu: 'logis', dedans: true }; }
+        if (pluie && PLUIE && !vie.restePluie) { return { lieu: 'logis', dedans: true }; }
 
         // la Veillée du Retour : on reste dehors, sur la place, jusqu'à 2 h
         if (veillee() && (h >= 18 || h < 2)) { return { lieu: 'place', dedans: false }; }
@@ -300,9 +317,11 @@
         var page = evenement.page && evenement.page();
         if (!page || !page.list) { return out; }
         out.boutique = page.list.some(function (c) { return c.code === 302; });
+        out.restePluie = false;
         commentairesDe(evenement).forEach(function (t, i, l) {
             var a = t.match(/<NPC:\s*([^>]+)>/i);
             if (a) { out.cle = a[1].trim(); }
+            if (/<Pluie:\s*reste\s*>/i.test(t)) { out.restePluie = true; }   // v2.5 : il ne rentre pas sous la pluie (Orin, sous l'auvent)
             var b = t.match(/<Vie:\s*([^>]+)>/i);
             if (b) { out.vie = b[1].trim().toLowerCase(); }
             var hab = t.match(/^◆ HABITANT · ([^—]*)(?:—\s*(.*))?$/);
@@ -415,6 +434,9 @@
         // chacun sa case sur la place, en couronne autour du milieu, espacées
         var cases = dedans ? [] : casesAutour(place, pnj.length + 4);
         var rang = 0;
+        // v2.5 : le repas de midi ailleurs (la plage du Village de Pêche)
+        var repas = !dedans && REPAS[$gameMap.mapId()] ? casePraticable(REPAS[$gameMap.mapId()]) : null;
+        var casesRepas = repas ? casesAutour(repas, pnj.length + 4) : [], rangRepas = 0;
 
         pnj.forEach(function (p) {
             var e = p.ev, m = p.m;
@@ -433,7 +455,8 @@
             var sa = metier === 'garde' || e._visite || !cases.length ? place : cases[rang++ % cases.length];
             e._vie = {
                 cle: m.cle, metier: metier, poste: poste, logis: logis, place: sa, milieu: place, cases: cases,
-                agenda: m.agenda || [], portes: portes, ronde: m.ronde, iRonde: 0,
+                agenda: m.agenda || [], portes: portes, ronde: m.ronde, iRonde: 0, restePluie: !!m.restePluie,
+                repas: repas && metier !== 'garde' && !e._visite && casesRepas.length ? casesRepas[rangRepas++ % casesRepas.length] : null, milieuRepas: repas,
                 dedans: false, but: null, dirPoste: e.event().pages[0] ? (e.page() || e.event().pages[0]).image.direction || e.direction() : e.direction(),
                 marche: {}, vers: null, premier: true
             };
@@ -535,6 +558,8 @@
 
         var but = ouAller(v, heure(), jourDeRepos(), pluie);
         var cible = v[but.lieu] || v.poste;
+        var aTable = but.lieu === 'place' && heure() === 12 && !!v.repas;      // v2.5 : midi, sur le sable
+        if (aTable) cible = v.repas;
         v.but = but.lieu;
         if (but.lieu === 'ronde' && v.ronde) {
             cible = v.ronde[v.iRonde % v.ronde.length];
@@ -592,7 +617,7 @@
 
         // ── arrivé : il se tient là, tourné du bon côté (v2.1 : il ne piétine plus) ──
         if (estArrive(ev, v, cible)) {
-            var dir = but.lieu === 'place' ? (versLe(ev, v.milieu || cible) || v.dirPoste) : v.dirPoste;
+            var dir = but.lieu === 'place' ? (versLe(ev, (aTable ? v.milieuRepas : v.milieu) || cible) || v.dirPoste) : v.dirPoste;
             if (but.lieu === 'place' && v.metier === 'garde') dir = ev.direction();       // la ronde de nuit : il regarde où il va
             seTenir(ev, v, dir);
             // le soir, sur la place, il change parfois de place (quelques cases, jamais au hasard)
