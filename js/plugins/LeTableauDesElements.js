@@ -2,7 +2,7 @@
 // LeTableauDesElements.js
 //=============================================================================
 /*:
- * @plugindesc v1.0 ■ Le tableau des éléments, refait : les trois arts et leur
+ * @plugindesc v1.1 ■ Le tableau des éléments, refait : les trois arts et leur
  * triangle, les réactions élémentaires, et qui frappe avec quoi dans l'équipe.
  * @author Projet Trois Sources
  *
@@ -32,6 +32,11 @@
  *
  *  ③ L'ÉQUIPE. Pour chaque héros, combien de techniques apprises frappent
  *     avec chaque élément — de quoi savoir qui pose quoi.
+ *
+ *  EN COMBAT (v1.1) : pendant qu'on choisit (les ordres ou la liste des
+ *  techniques), Ctrl ouvre la page des réactions par-dessus le combat ; le
+ *  curseur se pose sur l'élément qu'un ennemi porte déjà, et la légende dit
+ *  qui porte quoi. Ctrl ou Échap la referme, et on reprend où l'on était.
  *
  *  Tout est LU dans le jeu (System.json, les fiches, les réglages des
  *  plugins) : rien n'est recopié à la main, rien ne peut mentir après un
@@ -167,10 +172,17 @@ window.TableauDesElements = TableauDesElements;
     function Window_Tableau() { this.initialize.apply(this, arguments); }
     Window_Tableau.prototype = Object.create(Window_Base.prototype);
     Window_Tableau.prototype.constructor = Window_Tableau;
-    Window_Tableau.prototype.initialize = function () {
+    Window_Tableau.prototype.initialize = function (enCombat) {
         Window_Base.prototype.initialize.call(this, 0, 0, Graphics.boxWidth, Graphics.boxHeight);
-        this._page = 0; this._cx = 0; this._cy = 1;
+        this._combat = !!enCombat;
+        this._page = this._combat ? 1 : 0; this._cx = 0; this._cy = 1;
+        if (this._combat) { this.backOpacity = 255; }
         this.refresh();
+    };
+    /** En combat : les ennemis debout qui portent une aura. */
+    TableauDesElements.auras = function () {
+        if (!window.Fusion || !Fusion.aura || !$gameParty.inBattle()) { return []; }
+        return $gameTroop.aliveMembers().map(function (e) { return { nom: e.name(), element: Fusion.aura(e) }; }).filter(function (x) { return x.element; });
     };
     Window_Tableau.prototype.t = function (texte, x, y, w, align, taille, couleur) {
         this.contents.fontSize = taille || 18;
@@ -189,10 +201,13 @@ window.TableauDesElements = TableauDesElements;
     Window_Tableau.prototype.refresh = function () {
         this.contents.clear();
         var w = this.contentsWidth(), moi = this;
+        // en combat, un fond plein : les fenêtres du combat se lisaient au travers
+        if (this._combat) { this.contents.fillRect(0, 0, w, this.contentsHeight(), 'rgba(28, 10, 36, 0.96)'); }
         // l'en-tête : le titre, et les pages
         this.t(TITRE, 0, -6, 330, 'left', 17, this.textColor(14));
         var x = 330, lp = Math.floor((w - 330) / PAGES.length);
-        PAGES.forEach(function (p, i) {
+        if (this._combat) { this.t('Les réactions', 330, -6, w - 330, 'center', 19); }
+        else PAGES.forEach(function (p, i) {
             var actif = i === moi._page;
             if (actif) { moi.contents.fillRect(x + i * lp + 6, 24, lp - 12, 2, moi.textColor(14)); }
             moi.t((actif ? '' : '') + p, x + i * lp, -6, lp, 'center', actif ? 19 : 16, actif ? moi.normalColor() : moi.textColor(7));
@@ -201,7 +216,7 @@ window.TableauDesElements = TableauDesElements;
         if (this._page === 0) { this.pageArts(40); }
         else if (this._page === 1) { this.pageReactions(40); }
         else { this.pageEquipe(40); }
-        this.t(this._page === 1 ? '← → page (aux bords de la grille)    ↑ ↓ ← → case    Échap sortir' : '← → page    Échap sortir', 0, this.contentsHeight() - 30, w, 'left', 14, this.textColor(7));
+        this.t(this._combat ? '↑ ↓ ← → case    Ctrl ou Échap : retour au combat' : this._page === 1 ? '← → page (aux bords de la grille)    ↑ ↓ ← → case    en combat : Ctrl ouvre cette page' : '← → page    Échap sortir', 0, this.contentsHeight() - 30, w, 'left', 14, this.textColor(7));
         this.resetFontSettings();
     };
 
@@ -313,6 +328,16 @@ window.TableauDesElements = TableauDesElements;
         this.t('l\'aura repart pour ' + TableauDesElements.toursAura() + ' tours', xl, yy + 17, w - xl, 'left', 13, this.textColor(7));
         this.t('case vide : le nouvel', xl, yy + 44, w - xl, 'left', 13, this.textColor(7));
         this.t('élément remplace l\'aura', xl, yy + 61, w - xl, 'left', 13, this.textColor(7));
+        // en combat : ce que les ennemis portent en ce moment
+        if (this._combat) {
+            var au = TableauDesElements.auras(), ya = yy + 92;
+            this.t('Sur le terrain', xl, ya, w - xl, 'left', 16, this.textColor(14));
+            if (!au.length) { this.t('aucun ennemi ne porte d\'élément', xl, ya + 22, w - xl, 'left', 13, this.textColor(7)); }
+            au.slice(0, 6).forEach(function (x, k) {
+                moi.t('◈ ' + nomElement(x.element), xl, ya + 22 + k * 19, 80, 'left', 14, COULEURS[x.element]);
+                moi.t(x.nom, xl + 78, ya + 22 + k * 19, w - xl - 78, 'left', 13);
+            });
+        }
         // en bas : la case sous le curseur
         var yb = y + 8 * h + 10;
         this.contents.fillRect(0, yb - 4, w, 1, this.textColor(7));
@@ -364,7 +389,7 @@ window.TableauDesElements = TableauDesElements;
         if (this._page !== 1) { return false; }
         var nx = this._cx + dx, ny = this._cy + dy;
         if (ny < 0 || ny > 7) { return true; }
-        if (nx < 0 || nx > 7) { return false; }
+        if (nx < 0 || nx > 7) { return !!this._combat; }
         this._cx = nx; this._cy = ny; SoundManager.playCursor(); this.refresh();
         return true;
     };
@@ -399,6 +424,64 @@ window.TableauDesElements = TableauDesElements;
         else if (TouchInput.isTriggered()) { t.page(1); }
     };
     TableauDesElements.Scene = Scene_TableauDesElements;
+
+    //=========================================================================
+    // En combat : Ctrl ouvre les réactions par-dessus, pendant qu'on choisit
+    //=========================================================================
+    // Pas une autre scène (revenir dans Scene_Battle relancerait le début du combat) : une fenêtre posée dessus.
+    // Tant qu'elle est ouverte, la fenêtre de saisie d'en dessous est désactivée — jamais deux à la fois — et
+    // c'est elle qu'on réactive en fermant.
+    TableauDesElements.ouvert = function () { var S = SceneManager._scene; return !!(S && S._tableauCombat && S._tableauCombat.visible); };
+    function fenetreDeSaisie(S) {
+        var l = [S._skillWindow, S._actorCommandWindow];
+        for (var i = 0; i < l.length; i++) { if (l[i] && l[i].active && l[i].isOpen() && l[i].visible) { return l[i]; } }
+        return null;
+    }
+    Scene_Battle.prototype.ouvrirTableau = function () {
+        var dessous = fenetreDeSaisie(this);
+        if (!dessous || !BattleManager.isInputting()) { return false; }
+        if (!this._tableauCombat) { this._tableauCombat = new Window_Tableau(true); this.addChild(this._tableauCombat); }
+        var t = this._tableauCombat, au = TableauDesElements.auras();
+        if (au.length) {
+            t._cy = Math.max(0, FOND.indexOf(au[0].element));
+            // sur la première case de sa ligne qui réagit
+            var R = TableauDesElements.reactions(), col = -1;
+            FOND.forEach(function (e, i) { if (col < 0 && R[au[0].element + '+' + e]) { col = i; } });
+            t._cx = col >= 0 ? col : 0;
+        }
+        t.refresh(); t.show();
+        dessous.deactivate(); this._tableauDessous = dessous;
+        SoundManager.playOk();
+        return true;
+    };
+    Scene_Battle.prototype.fermerTableau = function () {
+        if (!this._tableauCombat || !this._tableauCombat.visible) { return; }
+        this._tableauCombat.hide();
+        SoundManager.playCancel();
+        Input.clear(); TouchInput.clear();          // la touche qui ferme ne doit pas annuler la liste d'en dessous
+        if (this._tableauDessous) { this._tableauDessous.activate(); }
+        this._tableauDessous = null;
+    };
+    // MV rouvre la fenêtre des ordres dès qu'aucune fenêtre de saisie n'est active (changeInputWindow) : tant que
+    // le tableau est ouvert, c'est lui la fenêtre de saisie.
+    var _saisie = Scene_Battle.prototype.isAnyInputWindowActive;
+    Scene_Battle.prototype.isAnyInputWindowActive = function () {
+        return TableauDesElements.ouvert() || _saisie.call(this);
+    };
+    var _majCombat = Scene_Battle.prototype.update;
+    Scene_Battle.prototype.update = function () {
+        if (this._tableauCombat && this._tableauCombat.visible) {
+            var t = this._tableauCombat;
+            if (Input.isTriggered('control') || Input.isTriggered('cancel') || TouchInput.isCancelled() || TouchInput.isTriggered() || !BattleManager.isInputting()) { this.fermerTableau(); }
+            else if (Input.isRepeated('right')) { t.deplacer(1, 0); }
+            else if (Input.isRepeated('left')) { t.deplacer(-1, 0); }
+            else if (Input.isRepeated('down')) { t.deplacer(0, 1); }
+            else if (Input.isRepeated('up')) { t.deplacer(0, -1); }
+        } else if (Input.isTriggered('control') && $gameParty.inBattle()) {
+            this.ouvrirTableau();
+        }
+        _majCombat.call(this);
+    };
     TableauDesElements.ancienne = window.Scene_MvxElements || null;      // gardée, pour qui la voudrait
     window.Scene_MvxElements = Scene_TableauDesElements;
     if (typeof Scene_MvxElements !== 'undefined') { try { Scene_MvxElements = Scene_TableauDesElements; } catch (e) { /* rien */ } }

@@ -5,7 +5,7 @@
 //=============================================================================
 
 /*:
- * @plugindesc v1.1 ■ Remplace l'écran des compétences par un ORBE : le héros
+ * @plugindesc v1.2 ■ Remplace l'écran des compétences par un ORBE : le héros
  * au centre, ses voies en branches, ses compétences en nœuds.
  *
  * @param Rayon de l'orbe
@@ -608,6 +608,8 @@
         if (pv) { out.push({ texte: pv + ' PV', couleur: b.textColor.call(FENETRE || b, 10) }); }
         return out;
     }
+    var TRIS = [{ cle: 'niveau', nom: 'par niveau' }, { cle: 'apprises', nom: 'apprises seulement' }, { cle: 'cout', nom: 'par coût' }, { cle: 'element', nom: 'par élément' }];
+    var TRI = 0;              // gardé d'un héros à l'autre, le temps de la partie
     var FENETRE = null;       // une fenêtre vivante, pour lire les couleurs du windowskin
     var CIBLES = { 1: 'un ennemi', 2: 'tous les ennemis', 3: 'un ennemi au hasard', 4: '2 ennemis au hasard', 5: '3 ennemis au hasard',
         6: '4 ennemis au hasard', 7: 'un allié', 8: 'tous les alliés', 9: 'un allié tombé', 10: 'les alliés tombés', 11: 'soi' };
@@ -673,8 +675,20 @@
         return this._acteur.isLearnedSkill(noeud.skill.id) && this._acteur.canUse(noeud.skill);
     };
 
+    // v1.2 — Ctrl change la façon de ranger la liste (une branche de 47 techniques se parcourt mal d'un bloc).
+    // Rien n'est retiré : « apprises seulement » cache ce qui n'est pas encore appris, le temps de regarder.
     Window_Noeuds.prototype.makeItemList = function () {
-        this._donnees = this._branche ? this._branche.noeuds.slice() : [];
+        var l = this._branche ? this._branche.noeuds.slice() : [], a = this._acteur;
+        var t = TRIS[TRI] ? TRIS[TRI].cle : 'niveau';
+        if (a && t === 'apprises') { l = l.filter(function (n) { return a.isLearnedSkill(n.skill.id); }); }
+        else if (a && t === 'cout') {
+            var prix = function (n) { return couts(a, n.skill).reduce(function (m, c) { return m + parseInt(c.texte, 10); }, 0); };
+            l.sort(function (x, y) { return (prix(x) - prix(y)) || (x.niveau - y.niveau) || (x.skill.id - y.skill.id); });
+        } else if (t === 'element') {
+            var el = function (n) { var e = n.skill.damage ? n.skill.damage.elementId : 0; return e > 1 ? e : 999; };
+            l.sort(function (x, y) { return (el(x) - el(y)) || (x.niveau - y.niveau) || (x.skill.id - y.skill.id); });
+        }
+        this._donnees = l;
     };
 
     Window_Noeuds.prototype.refresh = function () {
@@ -843,6 +857,7 @@
         else {
             pied = '← → branche    ↑ ↓ technique    Q / W héros';
             if (window.Favoris && Favoris.basculer) { pied += '    Tab ★ favori'; }
+            pied += '    Ctrl tri : ' + TRIS[TRI].nom;
             if (niveauEnAttente(this._acteur)) { pied += '    Maj monter de niveau'; }
         }
         this.drawText(pied, 0, this.contentsHeight() - 30, w, 'left');
@@ -993,8 +1008,20 @@
             else if (Input.isRepeated('left')) { this.changerBranche(-1); }
             else if (Input.isTriggered('shift')) { this.monterDeNiveau(); }
             else if (Input.isTriggered('tab')) { this.epingler(); }
+            else if (Input.isTriggered('control')) { this.changerTri(); }
         }
         this.rafraichir();
+    };
+
+    // v1.2 — Ctrl : par niveau → apprises seulement → par coût → par élément ; le curseur reste sur sa technique
+    Scene_OrbeCapacites.prototype.changerTri = function () {
+        var w = this._itemWindow, garde = w.item();
+        TRI = (TRI + 1) % TRIS.length;
+        SoundManager.playCursor();
+        w.refresh();
+        var i = -1; (w._donnees || []).forEach(function (n, k) { if (n.skill === garde) { i = k; } });
+        w.select(Math.max(0, i)); if (i < 0) { w.resetScroll(); }
+        this._infoWindow._noeud = null;
     };
 
     // v1.1 — Tab épingle la technique sous le curseur dans les favoris du combat (LesFavoris)
@@ -1063,5 +1090,6 @@
     window.Scene_Skill = Scene_OrbeCapacites;
 
     // De quoi mesurer sans deviner : ce que l'Orbe montre, héros par héros.
-    window.OrbeDesCapacites = { branchesDe: branchesDe, sesBranches: SES_BRANCHES, etiquettes: etiquettes, couts: couts, nomCourt: nomCourt };
+    window.OrbeDesCapacites = { branchesDe: branchesDe, sesBranches: SES_BRANCHES, etiquettes: etiquettes, couts: couts, nomCourt: nomCourt,
+        tris: TRIS, tri: function () { return TRIS[TRI].cle; }, poserTri: function (i) { TRI = Math.max(0, Math.min(TRIS.length - 1, i)); } };
 })();
