@@ -5,7 +5,7 @@
 //=============================================================================
 
 /*:
- * @plugindesc v1.0 ■ Remplace l'écran des compétences par un ORBE : le héros
+ * @plugindesc v1.1 ■ Remplace l'écran des compétences par un ORBE : le héros
  * au centre, ses voies en branches, ses compétences en nœuds.
  *
  * @param Rayon de l'orbe
@@ -211,7 +211,7 @@
 
     // Le cadre : l'orbe occupe la moitié gauche, la liste des nœuds la droite.
     var H_TITRE = 72;
-    var H_INFO = 168;
+    var H_INFO = 184;
     var L_LISTE = 384;
 
     //=========================================================================
@@ -595,6 +595,45 @@
     //=========================================================================
     // La liste des nœuds de la branche choisie
     //=========================================================================
+    // v1.1 — ce que la liste et le bandeau du bas disent d'une technique
+    function nomCourt(s) { var n = String(s.name), i = n.indexOf(' : '); return i >= 0 ? n.slice(i + 3) : n; }
+    /** Ses coûts, chacun dans sa monnaie et sa couleur : PM, PT, PV (le vrai coût, affinité comprise). */
+    function couts(acteur, s) {
+        var out = [], b = Window_Base.prototype;
+        var pm = acteur ? acteur.skillMpCost(s) : s.mpCost;
+        var pt = acteur ? acteur.skillTpCost(s) : s.tpCost;
+        var pv = acteur && acteur.skillHpCost ? acteur.skillHpCost(s) : 0;
+        if (pm) { out.push({ texte: pm + ' PM', couleur: b.textColor.call(FENETRE || b, 23) }); }
+        if (pt) { out.push({ texte: pt + ' PT', couleur: b.textColor.call(FENETRE || b, 29) }); }
+        if (pv) { out.push({ texte: pv + ' PV', couleur: b.textColor.call(FENETRE || b, 10) }); }
+        return out;
+    }
+    var FENETRE = null;       // une fenêtre vivante, pour lire les couleurs du windowskin
+    var CIBLES = { 1: 'un ennemi', 2: 'tous les ennemis', 3: 'un ennemi au hasard', 4: '2 ennemis au hasard', 5: '3 ennemis au hasard',
+        6: '4 ennemis au hasard', 7: 'un allié', 8: 'tous les alliés', 9: 'un allié tombé', 10: 'les alliés tombés', 11: 'soi' };
+    var ARTS = { parole: 'PAROLE', mouvement: 'VOIE', ecrit: 'RUNE' };
+    /** Les étiquettes d'une technique : son art, son élément, sa cible, sa recharge, où elle s'emploie. */
+    function etiquettes(acteur, s) {
+        var out = [];
+        var a = window.LesTroisArts && LesTroisArts.art ? LesTroisArts.art(s) : null;
+        if (a && ARTS[a]) { out.push({ texte: ARTS[a], couleur: '#ffd27a' }); }
+        var e = s.damage ? s.damage.elementId : 0, noms = [];
+        if (e > 1 && $dataSystem.elements[e]) { noms.push($dataSystem.elements[e].trim()); }
+        (s.multipleElements || []).forEach(function (x) { var n = ($dataSystem.elements[x] || '').trim(); if (x > 1 && n && noms.indexOf(n) < 0) { noms.push(n); } });
+        if (e === -1) { noms.push('l\'arme'); }
+        if (noms.length) { out.push({ texte: noms.join(' + ').toLowerCase(), couleur: '#9fd8ff' }); }
+        if (CIBLES[s.scope]) { out.push({ texte: CIBLES[s.scope], couleur: '#d8d8e8' }); }
+        var r = s.cooldown && s.cooldown[s.id] ? Number(s.cooldown[s.id]) : 0;
+        if (r > 0) { out.push({ texte: 'recharge ' + r + ' t.', couleur: '#ffa0a0' }); }
+        if (s.occasion === 1) { out.push({ texte: 'en combat', couleur: '#b0b0c0' }); }
+        else if (s.occasion === 2) { out.push({ texte: 'au menu', couleur: '#b0b0c0' }); }
+        else if (s.occasion === 3) { out.push({ texte: 'jamais lancée', couleur: '#b0b0c0' }); }
+        if (acteur && window.LesTroisArts && LesTroisArts.horsAffinite && LesTroisArts.horsAffinite(acteur, s)) {
+            out.push({ texte: '◇ hors affinité', couleur: '#ff9a6a' });
+        }
+        return out;
+    }
+
     function Window_Noeuds() { this.initialize.apply(this, arguments); }
     Window_Noeuds.prototype = Object.create(Window_Selectable.prototype);
     Window_Noeuds.prototype.constructor = Window_Noeuds;
@@ -608,6 +647,7 @@
         this._branche = null;
         this._donnees = [];
         Window_Selectable.prototype.initialize.call(this, x, y, largeur, hauteur);
+        FENETRE = this;
     };
 
     Window_Noeuds.prototype.poser = function (acteur, branche) {
@@ -664,16 +704,30 @@
 
         this.changePaintOpacity(employable);
         this.drawItem_icone(s, r.x + 26, r.y);
+        // v1.1 — le nom court (« Premier art de l'épée : Fil du Vent » → « Fil du Vent » ; le nom entier est en bas),
+        // et une marge à droite : la barre de défilement mangeait « PM ».
+        var marge = 20, lCout = 96;
         this.contents.fontSize = 20;
-        this.drawText(s.name, r.x + 62, r.y, r.width - 62 - 96);
-        // à droite : le coût, ou le niveau où le nœud s'ouvre
+        this.drawText(nomCourt(s), r.x + 62, r.y, r.width - 62 - lCout - marge);
+        if (window.Favoris && Favoris.est && Favoris.est(this._acteur, s.id)) {
+            this.contents.fontSize = 14;
+            this.changeTextColor(this.textColor(17));
+            this.drawText('★', r.x + 44, r.y - 9, 20, 'left');
+        }
+        // à droite : le coût dans sa monnaie, ou le niveau où le nœud s'ouvre
         this.contents.fontSize = 18;
         if (!appris && noeud.niveau > 0) {
             this.changeTextColor(this.textColor(7));
-            this.drawText('Nv ' + noeud.niveau, r.x + r.width - 92, r.y, 92, 'right');
+            this.drawText('Nv ' + noeud.niveau, r.x + r.width - lCout - marge, r.y, lCout, 'right');
         } else {
-            this.changeTextColor(this.textColor(0));
-            this.drawText(this.coutTexte(s), r.x + r.width - 92, r.y, 92, 'right');
+            var c = couts(this._acteur, s), x = r.x + r.width - marge;
+            if (!c.length) { this.changeTextColor(this.textColor(7)); this.drawText('—', x - lCout, r.y, lCout, 'right'); }
+            for (var k = c.length - 1; k >= 0; k--) {
+                this.changeTextColor(c[k].couleur);
+                var w = this.textWidth(c[k].texte) + 8;
+                this.drawText(c[k].texte, x - w, r.y, w, 'right');
+                x -= w;
+            }
         }
         this.resetTextColor();
         this.contents.fontSize = this.standardFontSize();
@@ -685,12 +739,7 @@
     };
 
     Window_Noeuds.prototype.coutTexte = function (s) {
-        var pm = this._acteur ? this._acteur.skillMpCost(s) : s.mpCost;
-        var pt = this._acteur ? this._acteur.skillTpCost(s) : s.tpCost;
-        var bouts = [];
-        if (pm) { bouts.push(pm + ' PM'); }
-        if (pt) { bouts.push(pt + ' PT'); }
-        return bouts.join(' ') || '—';
+        return couts(this._acteur, s).map(function (c) { return c.texte; }).join(' ') || '—';
     };
 
     Window_Noeuds.prototype.itemHeight = function () { return this.lineHeight() + 6; };
@@ -743,19 +792,13 @@
     Window_Noeud_Info.prototype.refresh = function () {
         this.contents.clear();
         if (!this._noeud) { return; }
-        var s = this._noeud.skill;
-        var l = this.lineHeight();
+        var s = this._noeud.skill, w = this.contentsWidth();
         var appris = this._acteur && this._acteur.isLearnedSkill(s.id);
 
-        this.changeTextColor(this.textColor(this._branche && this._branche.ouverte ? 0 : 7));
-        this.contents.fontSize = 24;
-        this.drawText(s.name, 0, 0, this.contentsWidth() - 240);
-        this.resetTextColor();
-        this.contents.fontSize = 18;
-
+        // ── 1. le nom entier, et où elle en est
         var etat;
         if (appris) {
-            etat = this._acteur.canUse(s) ? 'employable maintenant' : 'apprise — pas maintenant';
+            etat = this._acteur.canUse(s) ? 'employable maintenant' : (s.occasion === 1 ? 'apprise — en combat' : 'apprise — pas maintenant');
         } else if (this._noeud.niveau > 0) {
             var reste = this._noeud.niveau - this._acteur.level;
             if (reste <= 1 && niveauEnAttente(this._acteur)) { etat = 'le niveau qui t\'attend l\'ouvre'; }
@@ -764,28 +807,45 @@
         } else {
             etat = 'pas encore apprise';
         }
+        this.contents.fontSize = 17;
+        var lEtat = this.textWidth(etat) + 12;
         this.changeTextColor(this.textColor(appris ? 24 : 7));
-        this.drawText(etat, this.contentsWidth() - 240, 0, 240, 'right');
+        this.drawText(etat, w - lEtat, -4, lEtat, 'right');
+        this.changeTextColor(this.textColor(this._branche && this._branche.ouverte ? 0 : 7));
+        this.contents.fontSize = 22;
+        this.drawText(s.name, 0, -4, w - lEtat - 8);
+
+        // ── 2. ses étiquettes : l'art, l'élément, la cible, le coût, la recharge
+        this.contents.fontSize = 16;
+        var x = 0, y = 24, moi = this;
+        var bouts = etiquettes(this._acteur, s).concat(couts(this._acteur, s));
+        if (window.Favoris && Favoris.est && Favoris.est(this._acteur, s.id)) { bouts.push({ texte: '★ favori', couleur: this.textColor(17) }); }
+        bouts.forEach(function (b, k) {
+            var lw = moi.textWidth(b.texte);
+            if (x + lw > w) { return; }
+            if (k > 0) { moi.changeTextColor(moi.textColor(7)); moi.drawText('·', x, y, 14, 'center'); x += 14; }
+            moi.changeTextColor(b.couleur);
+            moi.drawText(b.texte, x, y, lw + 4, 'left');
+            x += lw + 2;
+        });
         this.resetTextColor();
 
-        this.contents.fontSize = this.standardFontSize();
-        // drawTextEx ne borne rien : une description longue sortait de la
-        // fenêtre et se coupait au milieu d'un mot. On la replie sur deux
-        // lignes, aux espaces, sans en perdre un morceau en silence.
-        var lignes = this.replier(String(s.description || '').replace(/\n/g, ' '), this.contentsWidth() - 8, 2);
-        lignes.forEach(function (texte, i) { this.drawTextEx(texte, 0, l * (i + 1)); }, this);
+        // ── 3. ce qu'elle fait : repliée aux espaces, trois lignes
+        this.contents.fontSize = 19;
+        var lignes = this.replier(String(s.description || '').replace(/\n/g, ' '), w - 8, 3);
+        lignes.forEach(function (texte, i) { moi.drawText(texte, 0, 50 + 24 * i, w, 'left'); });
 
-        // la branche à laquelle il appartient, et son avertissement s'il est fermé
-        this.contents.fontSize = 18;
+        // ── 4. le pied : les touches, ou l'avertissement d'une branche fermée
+        this.contents.fontSize = 14;
         this.changeTextColor(this.textColor(7));
-        var pied = this._branche ? ('branche « ' + this._branche.nom + ' »') : '';
-        if (this._branche && !this._branche.ouverte) {
-            pied += '  —  aucun trait n\'ouvre ce type : invisible en combat';
+        var pied;
+        if (this._branche && !this._branche.ouverte) { pied = 'aucun trait n\'ouvre cette branche : invisible en combat'; }
+        else {
+            pied = '← → branche    ↑ ↓ technique    Q / W héros';
+            if (window.Favoris && Favoris.basculer) { pied += '    Tab ★ favori'; }
+            if (niveauEnAttente(this._acteur)) { pied += '    Maj monter de niveau'; }
         }
-        if (niveauEnAttente(this._acteur)) { pied += '        [Maj] monter de niveau'; }
-        // ⚠ 2026-10-02 (tous_les_menus.js) : à l * 3, la ligne débordait sous
-        //   le bas du cadre et les jambages se coupaient (« capacité »)
-        this.drawText(pied, 0, Math.min(l * 3, this.contentsHeight() - l), this.contentsWidth());
+        this.drawText(pied, 0, this.contentsHeight() - 30, w, 'left');
         this.resetTextColor();
         this.contents.fontSize = this.standardFontSize();
     };
@@ -811,22 +871,35 @@
     Window_Orbe_Titre.prototype.refresh = function () {
         this.contents.clear();
         if (!this._acteur) { return; }
-        this.contents.fontSize = 22;
+        var w = this.contentsWidth(), a = this._acteur, b = this._branche;
+        this.contents.fontSize = 15;
         this.changeTextColor(this.textColor(14));
-        this.drawText(TITRE, 0, 0, 300);
+        this.drawText(TITRE, 0, -10, 300);
         this.resetTextColor();
-        this.contents.fontSize = this.standardFontSize();
-        var t = this._acteur.name() + '   ' + this._acteur.currentClass().name + '   Nv' + this._acteur.level;
-        this.drawText(t, 300, 0, 320, 'left');
-        // GALV_ManualLevel retient la montée de niveau jusqu'à ce que le joueur
-        // la prenne en main : quand elle attend, l'orbe le dit et la propose.
-        this.contents.fontSize = 18;
-        if (niveauEnAttente(this._acteur)) {
+        this.contents.fontSize = 24;
+        var ln = Math.min(150, this.textWidth(a.name()));
+        this.drawText(a.name(), 0, 8, 150, 'left');
+        this.contents.fontSize = 17;
+        this.changeTextColor(this.textColor(7));
+        this.drawText(a.currentClass().name + ' · Nv ' + a.level, ln + 14, 10, 240, 'left');
+        // v1.1 — la branche ouverte et ce qu'il en sait déjà
+        if (b) {
+            var sus = b.noeuds.filter(function (n) { return a.isLearnedSkill(n.skill.id); }).length;
+            this.contents.fontSize = 22;
+            this.changeTextColor(b.couleur);
+            var lb = this.textWidth(b.nom);
+            this.drawText(b.nom, w - 420, 4, 300, 'right');
+            this.contents.fontSize = 15;
+            this.changeTextColor(this.textColor(7));
+            this.drawText(sus + ' / ' + b.noeuds.length + ' apprises', w - 420, 5, 300 - lb - 14, 'right');
+        }
+        this.contents.fontSize = 16;
+        if (niveauEnAttente(a)) {
             this.changeTextColor(this.textColor(17));
-            this.drawText('⬆ MAJ (un niveau t\'attend)', this.contentsWidth() - 300, 0, 240, 'right');
+            this.drawText('⬆ niveau', w - 110, 14, 110, 'right');
         }
         this.changeTextColor(this.textColor(7));
-        this.drawText((this._i + 1) + '/' + this._n, this.contentsWidth() - 56, 0, 56, 'right');
+        this.drawText('branche ' + (this._i + 1) + '/' + this._n, w - 110, niveauEnAttente(a) ? -6 : 4, 110, 'right');
         this.resetTextColor();
         this.contents.fontSize = this.standardFontSize();
     };
@@ -919,8 +992,21 @@
             if (Input.isRepeated('right')) { this.changerBranche(1); }
             else if (Input.isRepeated('left')) { this.changerBranche(-1); }
             else if (Input.isTriggered('shift')) { this.monterDeNiveau(); }
+            else if (Input.isTriggered('tab')) { this.epingler(); }
         }
         this.rafraichir();
+    };
+
+    // v1.1 — Tab épingle la technique sous le curseur dans les favoris du combat (LesFavoris)
+    Scene_OrbeCapacites.prototype.epingler = function () {
+        var a = this.actor(), s = this.item();
+        if (!a || !s || !window.Favoris || !Favoris.basculer || !a.isLearnedSkill(s.id)) { SoundManager.playBuzzer(); return; }
+        var r = Favoris.basculer(a, s.id);
+        if (r === null) { SoundManager.playBuzzer(); return; }
+        SoundManager.playEquip();
+        var i = this._itemWindow.index(), haut = this._itemWindow.topRow();
+        this._itemWindow.refresh(); this._itemWindow.setTopRow(haut); this._itemWindow.select(i);
+        this._infoWindow.refresh();
     };
 
     // Maj ouvre la montée de niveau du héros affiché, sans quitter l'orbe :
@@ -977,5 +1063,5 @@
     window.Scene_Skill = Scene_OrbeCapacites;
 
     // De quoi mesurer sans deviner : ce que l'Orbe montre, héros par héros.
-    window.OrbeDesCapacites = { branchesDe: branchesDe, sesBranches: SES_BRANCHES };
+    window.OrbeDesCapacites = { branchesDe: branchesDe, sesBranches: SES_BRANCHES, etiquettes: etiquettes, couts: couts, nomCourt: nomCourt };
 })();

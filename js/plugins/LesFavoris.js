@@ -24,7 +24,7 @@
  * @param touches
  * @text Épingler : touches
  * @desc Les touches de MV qui épinglent la technique sous le curseur, séparées par des virgules.
- * @default shift
+ * @default shift, tab
  *
  * @param appuiLong
  * @text Épingler : appui long (souris, doigt)
@@ -83,7 +83,7 @@ window.Favoris = Favoris;
     var FAVORIS = oui('favoris', 'true');
     var NOM = String(P.nomFavoris || '★ Favoris');
     var MAX = Math.max(1, Number(P.favorisMax || 8) || 8);
-    var TOUCHES = String(P.touches || 'shift').split(',').map(function (t) { return t.trim(); }).filter(Boolean);
+    var TOUCHES = String(P.touches || 'shift, tab').split(',').map(function (t) { return t.trim(); }).filter(Boolean);
     var LONG = oui('appuiLong', 'true');
     var REFAIRE = oui('refaire', 'true');
     var SIGNE = String(P.signeRefaire || '↻');
