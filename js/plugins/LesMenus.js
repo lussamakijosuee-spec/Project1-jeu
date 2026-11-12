@@ -2,7 +2,7 @@
 // LesMenus.js
 //=============================================================================
 /*:
- * @plugindesc v1.0 ■ Les menus : le menu principal refait (les cinq héros, le
+ * @plugindesc v1.1 ■ Les menus : le menu principal refait (les cinq héros, le
  * lieu, l'heure), les « Carnets », les Options rangées, le Bestiaire lisible,
  * le Statut en entier, et les derniers mots anglais en français.
  * @author Projet Trois Sources
@@ -136,6 +136,47 @@ window.LesMenus = LesMenus;
             this._profilLignes = lignes.length; this._profilCoupe = / …$/.test(lignes[lignes.length - 1] || '');
             // drawText centre son texte dans une ligne de 36 px : on la pose pour que l'interligne soit le nôtre
             lignes.forEach(function (l, k) { moi.drawText(l, x, y + k * inter - Math.floor((moi.lineHeight() - inter) / 2), largeur); });
+            this.contents.fontSize = avant;
+        };
+    }
+
+    //=========================================================================
+    // ③ bis L'écran d'équipement : la description replie sur ses deux lignes
+    //=========================================================================
+    // TSR_EquipSlots écrit la description d'une seule traite (drawTextEx) dans une case de deux lignes : une longue
+    // phrase sortait du cadre (« Relique du Fond : un objet qui n'existe pas… », les pièces de la forge, les armes
+    // d'ombre). Elle se replie aux espaces sur les deux lignes, et le corps se resserre (18 → 13) jusqu'à ce qu'elle
+    // tienne. Une description qui porte des codes (\C[n]…) reste dessinée comme avant.
+    if (typeof Window_EquipHelp !== 'undefined' && Window_EquipHelp.prototype.drawDescriptionBox) {
+        var _descEquip = Window_EquipHelp.prototype.drawDescriptionBox;
+        Window_EquipHelp.prototype.drawDescriptionBox = function (x, y, w, h) {
+            var texte = String(this._description || '');
+            if (!texte || /\\/.test(texte)) { _descEquip.call(this, x, y, w, h); return; }
+            if (TSR && TSR.equipSlots && TSR.equipSlots._BG_rect_help && this._item) { this.drawRect(0, y, w, h * 2); }
+            this.resetTextColor();
+            var moi = this, largeur = this.contentsWidth() - x * 2, haut = h * 2, avant = this.contents.fontSize;
+            var corps = [18, 17, 16, 15, 14, 13], lignes = [], inter = 22;
+            function replier() {
+                var out = [];
+                texte.split('\n').forEach(function (para) {
+                    var c = '';
+                    para.split(' ').forEach(function (mot) {
+                        var essai = c ? c + ' ' + mot : mot;
+                        if (moi.textWidth(essai) > largeur && c) { out.push(c); c = mot; } else { c = essai; }
+                    });
+                    if (c) { out.push(c); }
+                });
+                return out;
+            }
+            for (var i = 0; i < corps.length; i++) {
+                this.contents.fontSize = corps[i]; inter = corps[i] + 4;
+                lignes = replier();
+                if (lignes.length * inter <= haut) { break; }
+            }
+            var dispo = Math.max(1, Math.floor(haut / inter));
+            if (lignes.length > dispo) { lignes = lignes.slice(0, dispo); lignes[dispo - 1] += ' …'; }
+            this._descLignes = lignes.length;
+            lignes.forEach(function (l, k) { moi.contents.drawText(l, x, y + k * inter, largeur, inter, 'left'); });
             this.contents.fontSize = avant;
         };
     }
