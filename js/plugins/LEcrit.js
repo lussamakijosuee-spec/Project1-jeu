@@ -607,7 +607,8 @@ var LEcrit = LEcrit || {};
             // sans les cibles, une rune au sol le dit encore
             var courts = groupes.map(function (g, i) { return noms[i] + (g.qui.length === 1 && g.qui[0] === 'au sol' ? ' (sol)' : (g.qui.length === 1 && g.qui[0] === 'piège' ? ' (piège)' : '')); });
             var auSolCourt = groupes.map(function (g, i) { return noms[i] + (g.qui.length === 1 && (g.qui[0] === 'au sol' || g.qui[0] === 'piège') ? ' (sol)' : ''); });
-            var essais = ['ᛟ Dans le cercle : ' + avecCibles.join(' · '), 'ᛟ Dans le cercle : ' + courts.join(' · '), 'ᛟ Dans le cercle : ' + auSolCourt.join(' · '), 'ᛟ Dans le cercle : ' + noms.join(' · ')];
+            // « ᛟ Cercle : » quand la ligne longue ne tient pas : mieux vaut dire où est la rune que garder trois mots
+            var essais = ['ᛟ Dans le cercle : ' + avecCibles.join(' · '), 'ᛟ Cercle : ' + avecCibles.join(' · '), 'ᛟ Dans le cercle : ' + courts.join(' · '), 'ᛟ Cercle : ' + courts.join(' · '), 'ᛟ Dans le cercle : ' + auSolCourt.join(' · '), 'ᛟ Cercle : ' + auSolCourt.join(' · '), 'ᛟ Dans le cercle : ' + noms.join(' · ')];
             ligne = essais.filter(function (t) { return h.textWidth(t) <= h.contentsWidth() - 8; })[0] || '';
             if (!ligne) {
                 ligne = 'ᛟ ' + liste.length + ' dans le cercle : ';
@@ -677,6 +678,13 @@ var LEcrit = LEcrit || {};
         w.setHandler('cancel', this.annulerRune.bind(this));
         w.deactivate(); w.hide();
         this.addWindow(w);
+    };
+    // Tant qu'on choisit Garder / Piège, c'est elle la fenêtre de saisie : sans ça, MV ne voyait plus aucune
+    // fenêtre active (la liste vient d'être désactivée) et rouvrait les ordres derrière elle (changeInputWindow) —
+    // OK validait les deux à la fois, la rune ne partait jamais (JOKO, 2026-11-13).
+    var _saisieRune = Scene_Battle.prototype.isAnyInputWindowActive;
+    Scene_Battle.prototype.isAnyInputWindowActive = function () {
+        return !!(this._fenetreRune && this._fenetreRune.active) || _saisieRune.call(this);
     };
     var _okCapacite = Scene_Battle.prototype.onSkillOk;
     Scene_Battle.prototype.onSkillOk = function () {
