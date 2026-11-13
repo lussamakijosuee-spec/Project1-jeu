@@ -1,10 +1,10 @@
 //=============================================================================
-// LEcrit.js — v2.1
+// LEcrit.js — v2.2
 // L'Écrit, l'art de l'Âme (mana spirituel) : le stylo d'âme trace un cercle,
 // on y inscrit des runes, on le ferme.
 //=============================================================================
 /*:
- * @plugindesc v2.1 ■ L'Écrit (mana spirituel) : le stylo d'âme trace un cercle —
+ * @plugindesc v2.2 ■ L'Écrit (mana spirituel) : le stylo d'âme trace un cercle —
  * dans l'air sur une cible, ou au sol. On y inscrit des RUNES (3 au plus), on le
  * FERME : elles partent ensemble ; deux du même signe s'accordent.
  * @author pour JOKO
@@ -64,6 +64,25 @@
  * @param nomPiege
  * @text Le choix « Piège »
  * @default ✒ Piège — elle part quand l'ennemi agit
+ *
+ * @param nomEffacer
+ * @text L'ordre « Effacer »
+ * @default ᛟ Effacer…
+ * @desc JOKO, 2026-11-13 : « la possibilité d'annuler ». Sous « ᛟ Activer » : on choisit une rune en attente, elle disparaît. Vide = pas d'ordre.
+ *
+ * @param rembourseEfface
+ * @text Effacer une rune : la vie payée revient (%)
+ * @type number
+ * @default 50
+ * @desc Effacer ne coûte pas le tour. 0 = rien ne revient, 100 = tout.
+ *
+ * @param aideGarder
+ * @text Garder : la ligne d'aide
+ * @default Elle attend au sol. Elle part, plus forte, quand tu fermes le cercle (ᛟ Activer).
+ *
+ * @param aidePiege
+ * @text Piège : la ligne d'aide
+ * @default Elle part toute seule dès qu'un ennemi agit. Rien à activer.
  *
  * @param dejaEcrits
  * @text Types déjà écrits (partent tout de suite)
@@ -239,6 +258,11 @@ var LEcrit = LEcrit || {};
     var PAR_DEFAUT = String(P.solParDefaut || 'piege').trim().toLowerCase() === 'garder' ? 'garder' : 'piege';
     var NOM_GARDER = String(P.nomGarder || "ᛟ Garder — c'est toi qui l'actives");
     var NOM_PIEGE = String(P.nomPiege || "✒ Piège — elle part quand l'ennemi agit");
+    var NOM_EFFACER = String(P.nomEffacer === undefined ? 'ᛟ Effacer…' : P.nomEffacer).trim();
+    var REMBOURSE = nombre('rembourseEfface', 50) / 100;
+    var AIDE_GARDER = String(P.aideGarder || 'Elle attend au sol. Elle part, plus forte, quand tu fermes le cercle (ᛟ Activer).');
+    var AIDE_PIEGE = String(P.aidePiege || 'Elle part toute seule dès qu\'un ennemi agit. Rien à activer.');
+    var dernierMode = null;                  // le dernier choix Garder / Piège : le curseur y revient
     var SIGNES = { frappe: 'Frappe', prise: 'Prise', sceau: 'Sceau', lien: 'Lien', rempart: 'Rempart' };
 
     function enCombat() { return !!($gameParty && $gameParty.inBattle()); }
@@ -634,11 +658,13 @@ var LEcrit = LEcrit || {};
         if (sk && enCombat() && heros(a) && ecritsDe(a).length && a.isLearnedSkill(ACTIVER)) {
             this.addCommand(sk.name + ' · ' + ecritsDe(a).length, 'ecritActiver', a.canUse(sk));
         }
+        if (NOM_EFFACER && enCombat() && heros(a) && ecritsDe(a).length) { this.addCommand(NOM_EFFACER, 'ecritEffacer', true); }
     };
     var _fenetreOrdres = Scene_Battle.prototype.createActorCommandWindow;
     Scene_Battle.prototype.createActorCommandWindow = function () {
         _fenetreOrdres.call(this);
         this._actorCommandWindow.setHandler('ecritActiver', this.commandeActiver.bind(this));
+        this._actorCommandWindow.setHandler('ecritEffacer', this.commandeEffacer.bind(this));
     };
     Scene_Battle.prototype.commandeActiver = function () {
         var a = BattleManager.actor(), act = BattleManager.inputtingAction();
@@ -659,7 +685,73 @@ var LEcrit = LEcrit || {};
         this.addCommand(NOM_GARDER, 'garder');
         this.addCommand(NOM_PIEGE, 'piege');
     };
+    Window_ModeRune.prototype.updateHelp = function () {
+        if (this._helpWindow) { this._helpWindow.setText(this.currentSymbol() === 'garder' ? AIDE_GARDER : AIDE_PIEGE); }
+    };
     LEcrit.Window_ModeRune = Window_ModeRune;
+
+    // Effacer une rune (JOKO, 2026-11-13 : « la possibilité d'annuler ») : la liste de ses runes en attente.
+    function ouEst(m) { return m.sol ? (m.garde ? 'au sol' : 'piège') : (m.cible && m.cible.name ? m.cible.name() : '?'); }
+    function rendu(m) { return Math.floor((m.pv || 0) * REMBOURSE); }
+    function Window_EffacerRune() { this.initialize.apply(this, arguments); }
+    Window_EffacerRune.prototype = Object.create(Window_Command.prototype);
+    Window_EffacerRune.prototype.constructor = Window_EffacerRune;
+    Window_EffacerRune.prototype.windowWidth = function () { return 560; };
+    Window_EffacerRune.prototype.numVisibleRows = function () { return Math.max(1, Math.min(MAX, this.maxItems())); };
+    Window_EffacerRune.prototype.makeCommandList = function () {
+        var moi = this;
+        ecritsDe(this._acteur).forEach(function (m) {
+            var r = rendu(m);
+            moi.addCommand(nomCourt($dataSkills[m.competence]) + ' → ' + ouEst(m) + (r > 0 ? '  +' + r + ' ' + TextManager.hpA : ''), 'effacer');
+        });
+    };
+    Window_EffacerRune.prototype.ouvrirPour = function (a) {
+        this._acteur = a;
+        this.refresh();
+        this.height = this.fittingHeight(this.numVisibleRows());
+        this.createContents(); this.refresh();
+        this.x = (Graphics.boxWidth - this.width) / 2; this.y = (Graphics.boxHeight - this.height) / 2;
+        this.select(0); this.show(); this.open(); this.activate();
+    };
+    Window_EffacerRune.prototype.updateHelp = function () {
+        if (this._helpWindow) { this._helpWindow.setText('Efface cette rune : elle ne partira pas' + (REMBOURSE > 0 ? ', une part de la vie payée revient' : '') + '.\nEffacer ne coûte pas ton tour.'); }
+    };
+    Window_EffacerRune.prototype.standardBackOpacity = function () { return 255; };     // posée sur la liste : fond plein
+    Window_ModeRune.prototype.standardBackOpacity = function () { return 255; };
+    LEcrit.Window_EffacerRune = Window_EffacerRune;
+    /** Retire la rune n° i de ce héros, sans la faire partir. Rend ce qui revient. */
+    function effacer(a, i) {
+        var l = ecritsDe(a), m = l[i];
+        if (!m) { return -1; }
+        a._ecrits = l.filter(function (x) { return x !== m; });
+        if (m.sol) { montrerSol(m.sol); } else { montrer(m.cible); }
+        var r = a.isAlive() ? Math.min(rendu(m), a.mhp - a.hp) : 0;
+        if (r > 0) { a.setHp(a.hp + r); }
+        annonce(a, 'ᛟ Effacée · ' + nomCourt($dataSkills[m.competence]) + (r > 0 ? ' · +' + r + ' ' + TextManager.hpA : ''), '#b0a0c8');
+        return r;
+    }
+    LEcrit.effacer = effacer;
+    Scene_Battle.prototype.commandeEffacer = function () {
+        var a = BattleManager.actor(), w = this._fenetreEffacer;
+        if (!a || !w || !ecritsDe(a).length) { this._actorCommandWindow.activate(); return; }
+        this._actorCommandWindow.deactivate();
+        w.ouvrirPour(a);
+        this._helpWindow.show(); w.updateHelp();
+    };
+    Scene_Battle.prototype.effacerRuneOk = function () {
+        var a = BattleManager.actor(), w = this._fenetreEffacer;
+        effacer(a, w.index());
+        this._statusWindow.refresh();
+        if (ecritsDe(a).length) { var i = Math.min(w.index(), ecritsDe(a).length - 1); w.ouvrirPour(a); w.select(i); return; }
+        this.effacerRuneFin();
+    };
+    Scene_Battle.prototype.effacerRuneFin = function () {
+        var a = BattleManager.actor(), w = this._fenetreEffacer, c = this._actorCommandWindow, i = c.index();
+        w.deactivate(); w.hide(); this._helpWindow.hide();
+        // la ligne « Activer · n » a changé (ou disparu) : la liste des ordres se refait, le curseur reste où il peut
+        c.refresh(); c.select(Math.max(0, Math.min(i, c.maxItems() - 1))); c.activate();
+        if (!a) { c.deactivate(); }
+    };
     /** Une rune que ce héros tracerait au sol (une zone) : celle qui se choisit. */
     function auChoix(a, s) {
         if (!AU_CHOIX || !s || !heros(a)) { return false; }
@@ -676,31 +768,45 @@ var LEcrit = LEcrit || {};
         w.setHandler('garder', this.choisirRune.bind(this, 'garder'));
         w.setHandler('piege', this.choisirRune.bind(this, 'piege'));
         w.setHandler('cancel', this.annulerRune.bind(this));
+        w.setHelpWindow(this._helpWindow);
         w.deactivate(); w.hide();
         this.addWindow(w);
+        var f = this._fenetreEffacer = new Window_EffacerRune(0, 0);
+        f.setHandler('effacer', this.effacerRuneOk.bind(this));
+        f.setHandler('cancel', this.effacerRuneFin.bind(this));
+        f.setHelpWindow(this._helpWindow);
+        f.deactivate(); f.hide();
+        this.addWindow(f);
     };
     // Tant qu'on choisit Garder / Piège, c'est elle la fenêtre de saisie : sans ça, MV ne voyait plus aucune
     // fenêtre active (la liste vient d'être désactivée) et rouvrait les ordres derrière elle (changeInputWindow) —
     // OK validait les deux à la fois, la rune ne partait jamais (JOKO, 2026-11-13).
     var _saisieRune = Scene_Battle.prototype.isAnyInputWindowActive;
     Scene_Battle.prototype.isAnyInputWindowActive = function () {
-        return !!(this._fenetreRune && this._fenetreRune.active) || _saisieRune.call(this);
+        return !!(this._fenetreRune && this._fenetreRune.active) || !!(this._fenetreEffacer && this._fenetreEffacer.active) || _saisieRune.call(this);
     };
     var _okCapacite = Scene_Battle.prototype.onSkillOk;
     Scene_Battle.prototype.onSkillOk = function () {
         var w = this._fenetreRune, act = BattleManager.inputtingAction();
         if (act) { act._modeRune = null; }
+        this._runeChoisie = false;
         if (w && auChoix(BattleManager.actor(), this._skillWindow.item())) {
-            this._skillWindow.deactivate();
-            w.select(PAR_DEFAUT === 'garder' ? 0 : 1);
-            w.show(); w.open(); w.activate();
+            this.ouvrirChoixRune();
             return;
         }
         _okCapacite.call(this);
     };
+    Scene_Battle.prototype.ouvrirChoixRune = function () {
+        var w = this._fenetreRune;
+        this._skillWindow.deactivate();
+        w.select((dernierMode || PAR_DEFAUT) === 'garder' ? 0 : 1);      // le curseur sur ton dernier choix
+        w.show(); w.open(); w.activate();
+        if (this._helpWindow) { this._helpWindow.show(); w.updateHelp(); }
+    };
     Scene_Battle.prototype.choisirRune = function (mode) {
         var w = this._fenetreRune, act = BattleManager.inputtingAction();
         w.deactivate(); w.hide();
+        dernierMode = mode; this._runeChoisie = true;
         if (act) { act._modeRune = mode; }
         // la liste reste inactive, comme après un OK. Activée ici (avant le 2026-11-03), elle répondait encore
         // aux touches, cachée derrière la fenêtre des cibles : un clic droit l'annulait et vidait l'action, et
@@ -710,8 +816,23 @@ var LEcrit = LEcrit || {};
     };
     Scene_Battle.prototype.annulerRune = function () {
         this._fenetreRune.deactivate(); this._fenetreRune.hide();
+        this._runeChoisie = false;
         this._skillWindow.activate();
+        if (this._skillWindow.updateHelp) { this._skillWindow.updateHelp(); }     // l'aide redit la rune, plus le choix
     };
+    // Annuler depuis la cible revient au choix Garder / Piège, pas à la liste : un pas en arrière, pas deux.
+    function retourAuChoix(scene) {
+        if (!scene._runeChoisie || !scene._fenetreRune || !scene._skillWindow.active) { return; }
+        var act = BattleManager.inputtingAction();
+        if (!auChoix(BattleManager.actor(), scene._skillWindow.item())) { scene._runeChoisie = false; return; }
+        if (act) { act._modeRune = null; }
+        scene._runeChoisie = false;
+        scene.ouvrirChoixRune();
+    }
+    var _annulerEnnemi = Scene_Battle.prototype.onEnemyCancel;
+    Scene_Battle.prototype.onEnemyCancel = function () { _annulerEnnemi.call(this); retourAuChoix(this); };
+    var _annulerAllie = Scene_Battle.prototype.onActorCancel;
+    Scene_Battle.prototype.onActorCancel = function () { _annulerAllie.call(this); retourAuChoix(this); };
     var _effacer = Game_Action.prototype.clear;
     Game_Action.prototype.clear = function () { _effacer.call(this); this._modeRune = null; };
 
